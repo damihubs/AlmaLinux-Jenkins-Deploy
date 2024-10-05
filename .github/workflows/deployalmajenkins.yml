@@ -18,22 +18,16 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Step 1: Create Resource Group
-    - name: Create Resource Group
-      run: |
-        echo "Attempting to create resource group divergenceRG2..."
-        az group create --name divergenceRG2 --location eastus
-        echo "Resource group created successfully."
-
-    # Step 2: Verify Resource Group Exists (immediate check)
-    - name: Verify Resource Group Exists Immediately
+    # Step 1: Create Resource Group (skip if exists)
+    - name: Create Resource Group if not exists
       run: |
         rg_exists=$(az group exists --name divergenceRG2)
-        if [ "$rg_exists" = true ]; then
-          echo "Resource Group divergenceRG2 exists and verified."
+        if [ "$rg_exists" = false ]; then
+          echo "Creating resource group divergenceRG2..."
+          az group create --name divergenceRG2 --location eastus
+          echo "Resource group created."
         else
-          echo "Resource Group divergenceRG2 does not exist, stopping the workflow."
-          exit 1
+          echo "Resource group divergenceRG2 already exists. Skipping creation."
         fi
 
   deploy:
@@ -49,44 +43,91 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Step 3: Generate SSH Keys (manually generate SSH keys)
-    - name: Generate SSH Keys
+    # Step 2: Generate SSH Keys (skip if they exist)
+    - name: Generate SSH Keys if not exist
       run: |
-        ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N ""
-
-    # Step 4: Create Networking Components (Virtual Network, Subnet, NSG, Public IP, NIC)
-    - name: Create Virtual Network and Subnet
-      run: |
-        az network vnet create --resource-group divergenceRG2 --name AlmaLinuxVNet --subnet-name AlmaLinuxSubnet --location eastus
-
-    - name: Create Network Security Group (NSG)
-      run: |
-        az network nsg create --resource-group divergenceRG2 --name AlmaLinuxNSG --location eastus
-
-    - name: Create Public IP
-      run: |
-        az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Static --location eastus
-
-    - name: Create Network Interface (NIC)
-      run: |
-        az network nic create --resource-group divergenceRG2 --name AlmaLinuxNIC --vnet-name AlmaLinuxVNet --subnet AlmaLinuxSubnet --network-security-group AlmaLinuxNSG --public-ip-address AlmaLinuxPublicIP
-
-    # Step 5: Create AlmaLinux VM with the Public IP attached, ensure the image URN is valid
-    - name: Create AlmaLinux VM
-      run: |
-        image_urn=${{ steps.image-search.outputs.image-urn }}
-        if [ -z "$image_urn" ]; then
-          echo "Image URN is empty. Stopping the workflow."
-          exit 1
+        if [ ! -f ~/.ssh/id_rsa ]; then
+          ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N ""
+          echo "SSH keys generated."
+        else
+          echo "SSH keys already exist. Skipping generation."
         fi
-        az vm create \
-          --resource-group divergenceRG2 \
-          --name AlmaLinuxVM \
-          --image "$image_urn" \
-          --admin-username azureuser \
-          --nics AlmaLinuxNIC \
-          --ssh-key-values ~/.ssh/id_rsa.pub \
-          --generate-ssh-keys
+
+    # Step 3: Create Networking Components (skip if they exist)
+    - name: Create Virtual Network and Subnet if not exists
+      run: |
+        vnet_exists=$(az network vnet show --resource-group divergenceRG2 --name AlmaLinuxVNet --query id --output tsv || echo "None")
+        if [ "$vnet_exists" = "None" ]; then
+          az network vnet create --resource-group divergenceRG2 --name AlmaLinuxVNet --subnet-name AlmaLinuxSubnet --location eastus
+          echo "Virtual Network and Subnet created."
+        else
+          echo "Virtual Network AlmaLinuxVNet already exists. Skipping creation."
+        fi
+
+    - name: Create Network Security Group if not exists
+      run: |
+        nsg_exists=$(az network nsg show --resource-group divergenceRG2 --name AlmaLinuxNSG --query id --output tsv || echo "None")
+        if [ "$nsg_exists" = "None" ]; then
+          az network nsg create --resource-group divergenceRG2 --name AlmaLinuxNSG --location eastus
+          echo "Network Security Group created."
+        else
+          echo "Network Security Group AlmaLinuxNSG already exists. Skipping creation."
+        fi
+
+    - name: Create Public IP if not exists
+      run: |
+        public_ip_exists=$(az network public-ip show --resource-group divergenceRG2 --name AlmaLinuxPublicIP --query id --output tsv || echo "None")
+        if [ "$public_ip_exists" = "None" ]; then
+          az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Static --location eastus
+          echo "Public IP created."
+        else
+          echo "Public IP AlmaLinuxPublicIP already exists. Skipping creation."
+        fi
+
+    - name: Create Network Interface if not exists
+      run: |
+        nic_exists=$(az network nic show --resource-group divergenceRG2 --name AlmaLinuxNIC --query id --output tsv || echo "None")
+        if [ "$nic_exists" = "None" ]; then
+          az network nic create --resource-group divergenceRG2 --name AlmaLinuxNIC --vnet-name AlmaLinuxVNet --subnet AlmaLinuxSubnet --network-security-group AlmaLinuxNSG --public-ip-address AlmaLinuxPublicIP
+          echo "Network Interface created."
+        else
+          echo "Network Interface AlmaLinuxNIC already exists. Skipping creation."
+        fi
+
+    # Step 4: Query Available AlmaLinux Images and select the latest
+    - name: Query Available AlmaLinux Images
+      id: image-search
+      run: |
+        latest_image=$(az vm image list --offer almalinux --all --output json | jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' | head -n 1)
+        if [ -z "$latest_image" ]; then
+          echo "Failed to retrieve AlmaLinux image URN."
+          exit 1
+        else
+          echo "Latest AlmaLinux Image URN: $latest_image"
+          echo "::set-output name=image-urn::$latest_image"
+        fi
+
+    # Step 5: Create AlmaLinux VM if not exists
+    - name: Create AlmaLinux VM if not exists
+      run: |
+        vm_exists=$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --query id --output tsv || echo "None")
+        if [ "$vm_exists" = "None" ]; then
+          image_urn=${{ steps.image-search.outputs.image-urn }}
+          if [ -z "$image_urn" ]; then
+            echo "Image URN is empty. Stopping the workflow."
+            exit 1
+          fi
+          az vm create \
+            --resource-group divergenceRG2 \
+            --name AlmaLinuxVM \
+            --image "$image_urn" \
+            --admin-username azureuser \
+            --nics AlmaLinuxNIC \
+            --ssh-key-values ~/.ssh/id_rsa.pub
+          echo "AlmaLinux VM created."
+        else
+          echo "AlmaLinux VM already exists. Skipping creation."
+        fi
 
     # Step 6: Wait for VM and Public IP Assignment
     - name: Wait for VM and Public IP Assignment
@@ -119,7 +160,7 @@ jobs:
         sudo systemctl start jenkins
         EOF
 
-    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH
+    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH (always check and create if necessary)
     - name: Open Ports in NSG for HTTP and Jenkins
       run: |
         az network nsg rule create \
@@ -129,7 +170,7 @@ jobs:
           --protocol tcp \
           --priority 1001 \
           --destination-port-ranges 80 \
-          --access allow
+          --access allow || echo "HTTP rule already exists."
 
     - name: Open Ports in NSG for Jenkins
       run: |
@@ -140,7 +181,7 @@ jobs:
           --protocol tcp \
           --priority 1002 \
           --destination-port-ranges 8080 \
-          --access allow
+          --access allow || echo "Jenkins rule already exists."
 
     - name: Open Ports in NSG for SSH
       run: |
@@ -151,7 +192,7 @@ jobs:
           --protocol tcp \
           --priority 1003 \
           --destination-port-ranges 22 \
-          --access allow
+          --access allow || echo "SSH rule already exists."
 
     # Step 10: Cleanup on failure
     - name: Cleanup on Failure
