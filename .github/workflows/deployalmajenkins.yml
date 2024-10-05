@@ -129,13 +129,13 @@ jobs:
           echo "AlmaLinux VM already exists. Skipping creation."
         fi
 
-    # Step 6: Wait for VM and Public IP Assignment
+    # Step 6: Wait for VM and Public IP Assignment (Increased wait time)
     - name: Wait for VM and Public IP Assignment
       run: |
-        echo "Waiting for 120 seconds to allow the VM to fully initialize..."
-        sleep 120
+        echo "Waiting for 180 seconds to allow the VM to fully initialize..."
+        sleep 180
 
-    # Step 7: Retrieve Public IP Address
+    # Step 7: Retrieve Public IP Address and verify
     - name: Retrieve Public IP Address
       run: |
         public_ip=""
@@ -147,6 +147,8 @@ jobs:
           else
             echo "Public IP: $public_ip"
             echo "public_ip=$public_ip" >> $GITHUB_ENV
+            echo "Pinging $public_ip to verify connectivity..."
+            ping -c 4 $public_ip
             break
           fi
         done
@@ -155,18 +157,25 @@ jobs:
           exit 1
         fi
 
-    # Step 8: Open Ports in NSG for SSH, HTTP, and Jenkins before SSH attempt
-    - name: Open Ports in NSG for SSH
+    # Step 8: Verify NSG Rule for SSH is Active
+    - name: Verify SSH Port Open in NSG
       run: |
-        az network nsg rule create \
-          --resource-group divergenceRG2 \
-          --nsg-name AlmaLinuxNSG \
-          --name AllowSSH \
-          --protocol tcp \
-          --priority 1001 \
-          --destination-port-ranges 22 \
-          --access allow || true
+        rule_exists=$(az network nsg rule show --resource-group divergenceRG2 --nsg-name AlmaLinuxNSG --name AllowSSH --query id --output tsv || echo "None")
+        if [ "$rule_exists" = "None" ]; then
+          echo "NSG Rule for SSH is not present. Creating rule."
+          az network nsg rule create \
+            --resource-group divergenceRG2 \
+            --nsg-name AlmaLinuxNSG \
+            --name AllowSSH \
+            --protocol tcp \
+            --priority 1001 \
+            --destination-port-ranges 22 \
+            --access allow || true
+        else
+          echo "NSG Rule for SSH already exists."
+        fi
 
+    # Step 9: Open Ports in NSG for HTTP and Jenkins
     - name: Open Ports in NSG for HTTP
       run: |
         az network nsg rule create \
@@ -189,7 +198,7 @@ jobs:
           --destination-port-ranges 8080 \
           --access allow || true
 
-    # Step 9: Install Jenkins on the AlmaLinux VM using SSH
+    # Step 10: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
       run: |
         for i in {1..10}; do
@@ -216,7 +225,7 @@ jobs:
           fi
         done
 
-    # Step 10: Cleanup on failure
+    # Step 11: Cleanup on failure
     - name: Cleanup on Failure
       if: failure()
       run: |
