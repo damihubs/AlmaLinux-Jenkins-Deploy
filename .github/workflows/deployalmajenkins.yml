@@ -138,16 +138,58 @@ jobs:
     # Step 7: Retrieve Public IP Address
     - name: Retrieve Public IP Address
       run: |
-        public_ip=$(az network public-ip show --resource-group divergenceRG2 --name AlmaLinuxPublicIP --query ipAddress -o tsv)
+        public_ip=""
+        for i in {1..10}; do
+          public_ip=$(az network public-ip show --resource-group divergenceRG2 --name AlmaLinuxPublicIP --query ipAddress -o tsv)
+          if [ -z "$public_ip" ]; then
+            echo "Public IP not assigned yet. Retrying in 30 seconds..."
+            sleep 30
+          else
+            echo "Public IP: $public_ip"
+            echo "public_ip=$public_ip" >> $GITHUB_ENV
+            break
+          fi
+        done
         if [ -z "$public_ip" ]; then
-          echo "Public IP not assigned yet."
+          echo "Failed to retrieve Public IP after multiple attempts."
           exit 1
-        else
-          echo "Public IP: $public_ip"
-          echo "public_ip=$public_ip" >> $GITHUB_ENV
         fi
 
-    # Step 8: Install Jenkins on the AlmaLinux VM using SSH
+    # Step 8: Open Ports in NSG for SSH, HTTP, and Jenkins before SSH attempt
+    - name: Open Ports in NSG for SSH
+      run: |
+        az network nsg rule create \
+          --resource-group divergenceRG2 \
+          --nsg-name AlmaLinuxNSG \
+          --name AllowSSH \
+          --protocol tcp \
+          --priority 1001 \
+          --destination-port-ranges 22 \
+          --access allow || true
+
+    - name: Open Ports in NSG for HTTP
+      run: |
+        az network nsg rule create \
+          --resource-group divergenceRG2 \
+          --nsg-name AlmaLinuxNSG \
+          --name AllowHTTP \
+          --protocol tcp \
+          --priority 1002 \
+          --destination-port-ranges 80 \
+          --access allow || true
+
+    - name: Open Ports in NSG for Jenkins
+      run: |
+        az network nsg rule create \
+          --resource-group divergenceRG2 \
+          --nsg-name AlmaLinuxNSG \
+          --name AllowJenkins \
+          --protocol tcp \
+          --priority 1003 \
+          --destination-port-ranges 8080 \
+          --access allow || true
+
+    # Step 9: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
       run: |
         for i in {1..10}; do
@@ -161,7 +203,7 @@ jobs:
         sudo systemctl enable jenkins
         sudo systemctl start jenkins
         EOF
-            if [ $? -eq 0 ]; then
+          if [ $? -eq 0 ]; then
             echo "Jenkins installed successfully."
             break
           else
@@ -173,41 +215,6 @@ jobs:
             exit 1
           fi
         done
-
-
-    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH
-    - name: Open Ports in NSG for HTTP and Jenkins
-      run: |
-        az network nsg rule create \
-          --resource-group divergenceRG2 \
-          --nsg-name AlmaLinuxNSG \
-          --name AllowHTTP \
-          --protocol tcp \
-          --priority 1001 \
-          --destination-port-ranges 80 \
-          --access allow || true
-
-    - name: Open Ports in NSG for Jenkins
-      run: |
-        az network nsg rule create \
-          --resource-group divergenceRG2 \
-          --nsg-name AlmaLinuxNSG \
-          --name AllowJenkins \
-          --protocol tcp \
-          --priority 1002 \
-          --destination-port-ranges 8080 \
-          --access allow || true
-
-    - name: Open Ports in NSG for SSH
-      run: |
-        az network nsg rule create \
-          --resource-group divergenceRG2 \
-          --nsg-name AlmaLinuxNSG \
-          --name AllowSSH \
-          --protocol tcp \
-          --priority 1003 \
-          --destination-port-ranges 22 \
-          --access allow || true
 
     # Step 10: Cleanup on failure
     - name: Cleanup on Failure
