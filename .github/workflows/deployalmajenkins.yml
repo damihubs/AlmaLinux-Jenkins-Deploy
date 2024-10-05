@@ -20,6 +20,7 @@ jobs:
 
     # Step 1: Check if the resource group exists
     - name: Check Resource Group
+      id: check-rg
       run: |
         if az group exists --name divergenceRG2; then
           echo "Resource Group exists."
@@ -29,18 +30,31 @@ jobs:
           echo "exists=false" >> $GITHUB_ENV
         fi
 
-    # Step 2: Create Resource Group if not exists
+    # Step 2: Create Resource Group if it does not exist
     - name: Create Resource Group
       if: env.exists == 'false'
       run: |
         az group create --name divergenceRG2 --location eastus
+        echo "Resource group created."
 
-    # Step 3: Wait for Resource Group Propagation (Add a delay)
-    - name: Wait for Resource Group Propagation
-      if: env.exists == 'false'
+    # Step 3: Verify Resource Group Creation with a Retry Mechanism
+    - name: Verify Resource Group Exists
       run: |
-        echo "Waiting for resource group to propagate..."
-        sleep 30  # Wait for 30 seconds to ensure the resource group is fully created
+        for i in {1..10}; do
+          echo "Checking if resource group exists (Attempt $i)..."
+          rg_exists=$(az group exists --name divergenceRG2)
+          if [ "$rg_exists" = true ]; then
+            echo "Resource Group found."
+            break
+          else
+            echo "Resource Group not found. Retrying in 10 seconds..."
+            sleep 10
+          fi
+          if [ $i -eq 10 ]; then
+            echo "Failed to verify Resource Group after multiple attempts."
+            exit 1
+          fi
+        done
 
     # Step 4: Generate SSH Keys (manually generate SSH keys)
     - name: Generate SSH Keys
@@ -66,7 +80,6 @@ jobs:
 
     # Step 6: Create AlmaLinux VM with the Public IP attached, ensure the image URN is valid
     - name: Create AlmaLinux VM
-      if: env.vm_exists == 'false'
       run: |
         image_urn=${{ steps.image-search.outputs.image-urn }}
         if [ -z "$image_urn" ]; then
@@ -82,7 +95,7 @@ jobs:
           --ssh-key-values ~/.ssh/id_rsa.pub \
           --generate-ssh-keys
 
-    # Step 7: Wait for Public IP Assignment (add additional wait time to ensure readiness)
+    # Step 7: Wait for VM and Public IP Assignment
     - name: Wait for VM and Public IP Assignment
       run: |
         echo "Waiting for 120 seconds to allow the VM to fully initialize..."
