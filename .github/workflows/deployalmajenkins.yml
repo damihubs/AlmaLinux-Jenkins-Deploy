@@ -129,11 +129,11 @@ jobs:
           echo "AlmaLinux VM already exists. Skipping creation."
         fi
 
-    # Step 6: Wait for VM and Public IP Assignment (Increased wait time)
+    # Step 6: Wait for VM and Public IP Assignment
     - name: Wait for VM and Public IP Assignment
       run: |
-        echo "Waiting for 180 seconds to allow the VM to fully initialize..."
-        sleep 180
+        echo "Waiting for 240 seconds to allow the VM to fully initialize..."
+        sleep 240
 
     # Step 7: Retrieve Public IP Address and verify
     - name: Retrieve Public IP Address
@@ -147,8 +147,6 @@ jobs:
           else
             echo "Public IP: $public_ip"
             echo "public_ip=$public_ip" >> $GITHUB_ENV
-            echo "Pinging $public_ip to verify connectivity..."
-            ping -c 4 $public_ip
             break
           fi
         done
@@ -203,7 +201,7 @@ jobs:
       run: |
         for i in {1..10}; do
           echo "Attempting SSH connection to ${public_ip} (Attempt $i)..."
-          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa azureuser@${{ env.public_ip }} << 'EOF'
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa azureuser@${public_ip} << 'EOF'
         sudo yum update -y
         sudo yum install -y java-11-openjdk
         sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
