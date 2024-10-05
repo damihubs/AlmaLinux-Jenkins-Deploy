@@ -27,7 +27,7 @@ jobs:
         else
           echo "Resource Group does not exist."
           echo "exists=false" >> $GITHUB_ENV
-        fi  # <- This `fi` closes the conditional block.
+        fi
 
     # Step 2: Create Resource Group if not exists
     - name: Create Resource Group
@@ -43,15 +43,15 @@ jobs:
     # Step 4: Create Networking Components (Virtual Network, Subnet, NSG, Public IP, NIC)
     - name: Create Virtual Network and Subnet
       run: |
-        az network vnet create --resource-group divergenceRG2 --name AlmaLinuxVNet --subnet-name AlmaLinuxSubnet
+        az network vnet create --resource-group divergenceRG2 --name AlmaLinuxVNet --subnet-name AlmaLinuxSubnet --location eastus
 
     - name: Create Network Security Group (NSG)
       run: |
-        az network nsg create --resource-group divergenceRG2 --name AlmaLinuxNSG
+        az network nsg create --resource-group divergenceRG2 --name AlmaLinuxNSG --location eastus
 
     - name: Create Public IP
       run: |
-        az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Static
+        az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Static --location eastus
 
     - name: Create Network Interface (NIC)
       run: |
@@ -65,7 +65,7 @@ jobs:
         if [ -z "$image_urn" ]; then
           echo "Image URN is empty. Stopping the workflow."
           exit 1
-        fi  # <- This `fi` closes the conditional block.
+        fi
         az vm create \
           --resource-group divergenceRG2 \
           --name AlmaLinuxVM \
@@ -91,7 +91,7 @@ jobs:
         else
           echo "Public IP: $public_ip"
           echo "public_ip=$public_ip" >> $GITHUB_ENV
-        fi  # <- This `fi` closes the conditional block.
+        fi
 
     # Step 8: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
@@ -149,4 +149,4 @@ jobs:
           az group delete --name divergenceRG2 --yes --no-wait
         else
           echo "No resource group found for cleanup."
-        fi  # <- This `fi` closes the conditional block.
+        fi
