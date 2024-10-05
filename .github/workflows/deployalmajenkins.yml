@@ -35,12 +35,19 @@ jobs:
       run: |
         az group create --name divergenceRG2 --location eastus
 
-    # Step 3: Generate SSH Keys (manually generate SSH keys)
+    # Step 3: Wait for Resource Group Propagation (Add a delay)
+    - name: Wait for Resource Group Propagation
+      if: env.exists == 'false'
+      run: |
+        echo "Waiting for resource group to propagate..."
+        sleep 30  # Wait for 30 seconds to ensure the resource group is fully created
+
+    # Step 4: Generate SSH Keys (manually generate SSH keys)
     - name: Generate SSH Keys
       run: |
         ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N ""
 
-    # Step 4: Create Networking Components (Virtual Network, Subnet, NSG, Public IP, NIC)
+    # Step 5: Create Networking Components (Virtual Network, Subnet, NSG, Public IP, NIC)
     - name: Create Virtual Network and Subnet
       run: |
         az network vnet create --resource-group divergenceRG2 --name AlmaLinuxVNet --subnet-name AlmaLinuxSubnet --location eastus
@@ -57,7 +64,7 @@ jobs:
       run: |
         az network nic create --resource-group divergenceRG2 --name AlmaLinuxNIC --vnet-name AlmaLinuxVNet --subnet AlmaLinuxSubnet --network-security-group AlmaLinuxNSG --public-ip-address AlmaLinuxPublicIP
 
-    # Step 5: Create AlmaLinux VM with the Public IP attached, ensure the image URN is valid
+    # Step 6: Create AlmaLinux VM with the Public IP attached, ensure the image URN is valid
     - name: Create AlmaLinux VM
       if: env.vm_exists == 'false'
       run: |
@@ -75,13 +82,13 @@ jobs:
           --ssh-key-values ~/.ssh/id_rsa.pub \
           --generate-ssh-keys
 
-    # Step 6: Wait for Public IP Assignment (add additional wait time to ensure readiness)
+    # Step 7: Wait for Public IP Assignment (add additional wait time to ensure readiness)
     - name: Wait for VM and Public IP Assignment
       run: |
         echo "Waiting for 120 seconds to allow the VM to fully initialize..."
         sleep 120
 
-    # Step 7: Retrieve Public IP Address
+    # Step 8: Retrieve Public IP Address
     - name: Retrieve Public IP Address
       run: |
         public_ip=$(az network public-ip show --resource-group divergenceRG2 --name AlmaLinuxPublicIP --query ipAddress -o tsv)
@@ -93,7 +100,7 @@ jobs:
           echo "public_ip=$public_ip" >> $GITHUB_ENV
         fi
 
-    # Step 8: Install Jenkins on the AlmaLinux VM using SSH
+    # Step 9: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
       run: |
         ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
@@ -106,7 +113,7 @@ jobs:
         sudo systemctl start jenkins
         EOF
 
-    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH
+    # Step 10: Open Ports in NSG for HTTP, Jenkins, and SSH
     - name: Open Ports in NSG for HTTP and Jenkins
       run: |
         az network nsg rule create \
@@ -140,7 +147,7 @@ jobs:
           --destination-port-ranges 22 \
           --access allow
 
-    # Step 10: Cleanup on failure
+    # Step 11: Cleanup on failure
     - name: Cleanup on Failure
       if: failure()
       run: |
