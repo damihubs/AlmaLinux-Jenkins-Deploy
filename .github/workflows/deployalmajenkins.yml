@@ -26,10 +26,12 @@ jobs:
       id: image-search
       run: |
         az vm image list --offer almalinux --all --output json > image_list.json
-        # Extract the latest available image URN
-        latest_image=$(jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux" and .publisher == "almalinuxosfoundation1628089859865") | .urn' image_list.json | head -n 1)
+        latest_image=$(jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' image_list.json | head -n 1)
         echo "Latest AlmaLinux Image URN: $latest_image"
         echo "::set-output name=image-urn::$latest_image"
+
+    - name: Debug: Print Image URN
+      run: echo "Selected Image URN: ${{ steps.image-search.outputs.image-urn }}"
 
     - name: Create AlmaLinux VM
       run: |
@@ -39,26 +41,3 @@ jobs:
           --image ${{ steps.image-search.outputs.image-urn }} \
           --admin-username azureuser \
           --generate-ssh-keys
-
-    - name: Open Ports in NSG
-      run: |
-        az network nsg rule create \
-          --resource-group divergenceRG \
-          --nsg-name AlmaLinuxVMNSG \
-          --name AllowHTTPAndJenkins \
-          --protocol tcp \
-          --priority 1000 \
-          --destination-port-ranges 80 8080 22 \
-          --access allow
-
-    - name: Install Jenkins on AlmaLinux VM
-      run: |
-        ssh -i /home/runner/.ssh/id_rsa azureuser@$(az vm show --resource-group divergenceRG --name AlmaLinuxVM --show-details --query [publicIpAddress] -o tsv) <<EOF
-        sudo yum update -y
-        sudo yum install -y java-11-openjdk
-        sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-        sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
-        sudo yum install -y jenkins
-        sudo systemctl enable jenkins
-        sudo systemctl start jenkins
-        EOF
