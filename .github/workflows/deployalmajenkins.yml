@@ -1,4 +1,4 @@
-name: Debug AlmaLinux VM Deployment
+name: AlmaLinux VM Deployment with Jenkins Setup
 
 on:
   push:
@@ -18,32 +18,43 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Step 1: Directly Check Resource Group and Print
+    # Step 1: Check if the resource group exists
     - name: Check Resource Group
       run: |
-        bash -c "if az group exists --name divergenceRG2; then echo 'Resource Group exists.'; echo 'exists=true' >> $GITHUB_ENV; else echo 'Resource Group does not exist.'; echo 'exists=false' >> $GITHUB_ENV; fi"
+        if az group exists --name divergenceRG2; then
+          echo "Resource Group exists."
+          echo "exists=true" >> $GITHUB_ENV
+        else
+          echo "Resource Group does not exist."
+          echo "exists=false" >> $GITHUB_ENV
+        fi
 
-    # Step 2: Conditionally Create Resource Group if not exists
+    # Step 2: Create Resource Group if not exists
     - name: Create Resource Group
       if: env.exists == 'false'
       run: |
         az group create --name divergenceRG2 --location eastus
 
-    # Step 3: Query Available AlmaLinux Images
+    # Step 3: Query Available AlmaLinux Images and select the latest
     - name: Query Available AlmaLinux Images
       id: image-search
       run: |
-        echo "Querying AlmaLinux images..."
-        az vm image list --offer almalinux --all --output table
         latest_image=$(az vm image list --offer almalinux --all --output json | jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' | head -n 1)
+        echo "Latest AlmaLinux Image URN: $latest_image"
         echo "::set-output name=image-urn::$latest_image"
 
-    # Step 4: Directly Check if VM Exists and Print
+    # Step 4: Check if the VM exists
     - name: Check if VM Exists
       run: |
-        bash -c "if az vm show --resource-group divergenceRG2 --name AlmaLinuxVM > /dev/null 2>&1; then echo 'VM exists.'; echo 'vm_exists=true' >> $GITHUB_ENV; else echo 'VM does not exist.'; echo 'vm_exists=false' >> $GITHUB_ENV; fi"
+        if az vm show --resource-group divergenceRG2 --name AlmaLinuxVM > /dev/null 2>&1; then
+          echo "VM exists."
+          echo "vm_exists=true" >> $GITHUB_ENV
+        else
+          echo "VM does not exist."
+          echo "vm_exists=false" >> $GITHUB_ENV
+        fi
 
-    # Step 5: Conditionally Create AlmaLinux VM only if it doesn't exist
+    # Step 5: Create AlmaLinux VM if it doesn't exist
     - name: Create AlmaLinux VM
       if: env.vm_exists == 'false'
       run: |
@@ -54,7 +65,36 @@ jobs:
           --admin-username azureuser \
           --generate-ssh-keys
 
-    # Step 6: Conditionally Open Ports in NSG for HTTP, Jenkins, and SSH if the VM is newly created
+    # Step 6: Wait for Public IP Assignment (added delay)
+    - name: Wait for Public IP Assignment
+      run: sleep 60
+
+    # Step 7: Retrieve the VM's public IP and store it in a GitHub environment variable
+    - name: Retrieve Public IP Address
+      run: |
+        public_ip=$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --show-details --query publicIpAddress -o tsv)
+        if [ -z "$public_ip" ]; then
+          echo "Public IP not assigned yet."
+          exit 1
+        else
+          echo "Public IP: $public_ip"
+          echo "public_ip=$public_ip" >> $GITHUB_ENV
+        fi
+
+    # Step 8: Install Jenkins on the AlmaLinux VM using SSH
+    - name: Install Jenkins on AlmaLinux VM
+      run: |
+        ssh -o StrictHostKeyChecking=no -i /home/runner/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
+        sudo yum update -y
+        sudo yum install -y java-11-openjdk
+        sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+        sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+        sudo yum install -y jenkins
+        sudo systemctl enable jenkins
+        sudo systemctl start jenkins
+        EOF
+
+    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH
     - name: Open Ports in NSG for HTTP and Jenkins
       if: env.vm_exists == 'false'
       run: |
@@ -91,20 +131,7 @@ jobs:
           --destination-port-ranges 22 \
           --access allow
 
-    # Step 7: Install Jenkins on the VM
-    - name: Install Jenkins on AlmaLinux VM
-      run: |
-        ssh -i /home/runner/.ssh/id_rsa azureuser@$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --show-details --query [publicIpAddress] -o tsv) <<EOF
-        sudo yum update -y
-        sudo yum install -y java-11-openjdk
-        sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-        sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
-        sudo yum install -y jenkins
-        sudo systemctl enable jenkins
-        sudo systemctl start jenkins
-        EOF
-
-    # Step 8: Cleanup on failure
+    # Step 10: Cleanup on failure
     - name: Cleanup on Failure
       if: failure()
       run: |
