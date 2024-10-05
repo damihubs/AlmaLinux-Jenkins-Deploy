@@ -1,4 +1,4 @@
-name: Deploy AlmaLinux VM to Azure and Set Up Jenkins
+name: Deploy AlmaLinux VM with Automated Image Selection
 
 on:
   push:
@@ -22,12 +22,21 @@ jobs:
       run: |
         az group create --name divergenceRG --location eastus
 
+    - name: Query Available AlmaLinux Images
+      id: image-search
+      run: |
+        az vm image list --offer almalinux --all --output json > image_list.json
+        # Extract the latest available image URN
+        latest_image=$(jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux" and .publisher == "almalinuxosfoundation1628089859865") | .urn' image_list.json | head -n 1)
+        echo "Latest AlmaLinux Image URN: $latest_image"
+        echo "::set-output name=image-urn::$latest_image"
+
     - name: Create AlmaLinux VM
       run: |
         az vm create \
           --resource-group divergenceRG \
           --name AlmaLinuxVM \
-          --image almalinuxosfoundation1628089859865:almalinux-8:8_4:8.4.20210729 \
+          --image ${{ steps.image-search.outputs.image-urn }} \
           --admin-username azureuser \
           --generate-ssh-keys
 
