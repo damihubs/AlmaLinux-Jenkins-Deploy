@@ -27,7 +27,7 @@ jobs:
         az vm create \
           --resource-group divergenceRG \
           --name AlmaLinuxVM \
-          --image almalinux:almalinux-8:8_4:latest \
+          --image almalinuxosfoundation1628089859865:almalinux-8:8_4:8.4.20210729 \
           --admin-username azureuser \
           --generate-ssh-keys
 
