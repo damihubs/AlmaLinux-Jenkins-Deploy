@@ -196,32 +196,15 @@ jobs:
           --destination-port-ranges 8080 \
           --access allow || true
 
-    # Step 10: Install Jenkins on the AlmaLinux VM using SSH
-    - name: Install Jenkins on AlmaLinux VM
+    # Step 10: Install Jenkins using Azure Custom Script Extension
+    - name: Install Jenkins using Azure Custom Script Extension
       run: |
-        for i in {1..10}; do
-          echo "Attempting SSH connection to ${public_ip} (Attempt $i)..."
-          ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=30 -i ~/.ssh/id_rsa azureuser@${public_ip} << 'EOF'
-        sudo yum update -y
-        sudo yum install -y java-11-openjdk
-        sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-        sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
-        sudo yum install -y jenkins
-        sudo systemctl enable jenkins
-        sudo systemctl start jenkins
-        EOF
-          if [ $? -eq 0 ]; then
-            echo "Jenkins installed successfully."
-            break
-          else
-            echo "Failed to SSH into the VM. Retrying in 30 seconds..."
-            sleep 30
-          fi
-          if [ $i -eq 10 ]; then
-            echo "Failed to install Jenkins after multiple attempts."
-            exit 1
-          fi
-        done
+        az vm extension set \
+          --resource-group divergenceRG2 \
+          --vm-name AlmaLinuxVM \
+          --name CustomScript \
+          --publisher Microsoft.Azure.Extensions \
+          --settings '{"commandToExecute":"sudo yum update -y && sudo yum install -y java-11-openjdk && sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo && sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key && sudo yum install -y jenkins && sudo systemctl enable jenkins && sudo systemctl start jenkins"}'
 
     # Step 11: Cleanup on failure
     - name: Cleanup on Failure
