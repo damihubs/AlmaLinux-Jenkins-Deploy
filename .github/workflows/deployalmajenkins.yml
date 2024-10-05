@@ -124,9 +124,9 @@ jobs:
         sudo yum install -y jenkins
         sudo systemctl enable jenkins
         sudo systemctl start jenkins
-EOF
-
-    # Cleanup on failure (Optional step)
+        EOF
+        
+  # Cleanup on failure (Optional step)
     - name: Cleanup on Failure
       if: failure()
       run: |
