@@ -23,9 +23,9 @@ jobs:
       id: check-rg
       run: |
         rg_exists=$(az group exists --name divergenceRG2)
-        if [ "$rg_exists" == "true" ]; then
+        if [ "$rg_exists" = "true" ]; then
           rg_state=$(az group show --name divergenceRG2 --query "properties.provisioningState" -o tsv)
-          if [ "$rg_state" == "Deleting" ]; then
+          if [ "$rg_state" = "Deleting" ]; then
             echo "Resource group is in Deleting state. Cleaning up..."
             az group delete --name divergenceRG2 --yes --no-wait
             echo "exists=false" >> $GITHUB_ENV
@@ -131,7 +131,7 @@ jobs:
       if: failure()
       run: |
         rg_exists=$(az group exists --name divergenceRG2)
-        if [ "$rg_exists" == "true" ]; then
+        if [ "$rg_exists" = "true" ]; then
           echo "Cleaning up resources due to failure..."
           az group delete --name divergenceRG2 --yes --no-wait
         else
