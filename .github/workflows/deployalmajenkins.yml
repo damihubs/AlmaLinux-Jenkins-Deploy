@@ -132,8 +132,8 @@ jobs:
     # Step 6: Wait for VM and Public IP Assignment
     - name: Wait for VM and Public IP Assignment
       run: |
-        echo "Waiting for 240 seconds to allow the VM to fully initialize..."
-        sleep 240
+        echo "Waiting for 300 seconds to allow the VM to fully initialize..."
+        sleep 300
 
     # Step 7: Retrieve Public IP Address and verify
     - name: Retrieve Public IP Address
@@ -201,7 +201,7 @@ jobs:
       run: |
         for i in {1..10}; do
           echo "Attempting SSH connection to ${public_ip} (Attempt $i)..."
-          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa azureuser@${public_ip} << 'EOF'
+          ssh -v -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa azureuser@${public_ip} << 'EOF'
         sudo yum update -y
         sudo yum install -y java-11-openjdk
         sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
