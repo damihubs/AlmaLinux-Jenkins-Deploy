@@ -54,7 +54,7 @@ jobs:
           echo "vm_exists=false" >> $GITHUB_ENV
         fi
 
-    # Step 5: Create AlmaLinux VM if it doesn't exist
+    # Step 5: Create AlmaLinux VM if it doesn't exist (with public IP)
     - name: Create AlmaLinux VM
       if: env.vm_exists == 'false'
       run: |
@@ -63,25 +63,30 @@ jobs:
           --name AlmaLinuxVM \
           --image ${{ steps.image-search.outputs.image-urn }} \
           --admin-username azureuser \
-          --generate-ssh-keys
+          --generate-ssh-keys \
+          --public-ip-address ""  # Ensure VM is created with a public IP
 
-    # Step 6: Wait for Public IP Assignment (added delay)
-    - name: Wait for Public IP Assignment
-      run: sleep 60
-
-    # Step 7: Retrieve the VM's public IP and store it in a GitHub environment variable
+    # Step 6: Retry Public IP Assignment (Loop until available or timeout)
     - name: Retrieve Public IP Address
       run: |
-        public_ip=$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --show-details --query publicIpAddress -o tsv)
-        if [ -z "$public_ip" ]; then
-          echo "Public IP not assigned yet."
-          exit 1
-        else
-          echo "Public IP: $public_ip"
-          echo "public_ip=$public_ip" >> $GITHUB_ENV
-        fi
+        for i in {1..10}; do
+          echo "Attempt $i: Checking for public IP..."
+          public_ip=$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --show-details --query publicIpAddress -o tsv)
+          if [ -n "$public_ip" ]; then
+            echo "Public IP: $public_ip"
+            echo "public_ip=$public_ip" >> $GITHUB_ENV
+            break
+          else
+            echo "Public IP not assigned yet. Retrying in 30 seconds..."
+            sleep 30
+          fi
+          if [ $i -eq 10 ]; then
+            echo "Failed to retrieve Public IP after multiple attempts."
+            exit 1
+          fi
+        done
 
-    # Step 8: Install Jenkins on the AlmaLinux VM using SSH
+    # Step 7: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
       run: |
         ssh -o StrictHostKeyChecking=no -i /home/runner/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
@@ -94,7 +99,7 @@ jobs:
         sudo systemctl start jenkins
         EOF
 
-    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH
+    # Step 8: Open Ports in NSG for HTTP, Jenkins, and SSH
     - name: Open Ports in NSG for HTTP and Jenkins
       if: env.vm_exists == 'false'
       run: |
@@ -131,7 +136,7 @@ jobs:
           --destination-port-ranges 22 \
           --access allow
 
-    # Step 10: Cleanup on failure
+    # Step 9: Cleanup on failure
     - name: Cleanup on Failure
       if: failure()
       run: |
