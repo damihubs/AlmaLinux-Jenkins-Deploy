@@ -46,7 +46,7 @@ jobs:
 
     - name: Create Public IP
       run: |
-        az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Dynamic
+        az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Static
 
     - name: Create Network Interface (NIC)
       run: |
