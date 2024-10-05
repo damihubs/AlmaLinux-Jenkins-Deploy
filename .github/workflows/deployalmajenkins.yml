@@ -51,7 +51,7 @@ jobs:
         az vm image list --offer almalinux --all --output json > image_list.json
         latest_image=$(jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' image_list.json | head -n 1)
         echo "Latest AlmaLinux Image URN: $latest_image"
-        echo "::set-output name=image-urn::$latest_image"
+        echo "image-urn=$latest_image" >> $GITHUB_ENV
 
     # Check if VM exists before creating it
     - name: Check if VM Exists
@@ -72,7 +72,7 @@ jobs:
         az vm create \
           --resource-group divergenceRG2 \
           --name AlmaLinuxVM \
-          --image ${{ steps.image-search.outputs.image-urn }} \
+          --image ${{ env.image-urn }} \
           --admin-username azureuser \
           --generate-ssh-keys
 
