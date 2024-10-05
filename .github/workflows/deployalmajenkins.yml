@@ -20,15 +20,12 @@ jobs:
 
     # Check if Resource Group Exists and Handle Deleting State
     - name: Check Resource Group
-      id: check-rg
       run: |
-        rg_exists=$(az group exists --name divergenceRG2)
-        if [ "$rg_exists" = "true" ]; then
+        if az group exists --name divergenceRG2; then
           rg_state=$(az group show --name divergenceRG2 --query "properties.provisioningState" -o tsv)
           if [ "$rg_state" = "Deleting" ]; then
-            echo "Resource group is in Deleting state. Cleaning up..."
-            az group delete --name divergenceRG2 --yes --no-wait
-            echo "exists=false" >> $GITHUB_ENV
+            echo "Resource group is in Deleting state. Exiting."
+            exit 1
           else
             echo "Resource Group exists."
             echo "exists=true" >> $GITHUB_ENV
@@ -36,7 +33,6 @@ jobs:
         else
           echo "Resource Group does not exist."
           echo "exists=false" >> $GITHUB_ENV
-        fi
 
     # Conditionally create the Resource Group if it doesn't exist
     - name: Create Resource Group (if not exists)
@@ -51,19 +47,18 @@ jobs:
         az vm image list --offer almalinux --all --output json > image_list.json
         latest_image=$(jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' image_list.json | head -n 1)
         echo "Latest AlmaLinux Image URN: $latest_image"
-        echo "image-urn=$latest_image" >> $GITHUB_ENV
+        echo "::set-output name=image-urn::$latest_image"
 
     # Check if VM exists before creating it
     - name: Check if VM Exists
-      id: check-vm
       run: |
-        vm_exists=$(az vm list --resource-group divergenceRG2 --query "[?name=='AlmaLinuxVM'].name" -o tsv)
-        if [ -z "$vm_exists" ]; then
-          echo "VM does not exist."
-          echo "vm_exists=false" >> $GITHUB_ENV
-        else
+        if az vm show --resource-group divergenceRG2 --name AlmaLinuxVM > /dev/null 2>&1; then
           echo "VM already exists."
           echo "vm_exists=true" >> $GITHUB_ENV
+        else
+          echo "VM does not exist."
+          echo "vm_exists=false" >> $GITHUB_ENV
+        fi
 
     # Conditionally Create AlmaLinux VM only if it doesn't exist
     - name: Create AlmaLinux VM
@@ -72,7 +67,7 @@ jobs:
         az vm create \
           --resource-group divergenceRG2 \
           --name AlmaLinuxVM \
-          --image ${{ env.image-urn }} \
+          --image ${{ steps.image-search.outputs.image-urn }} \
           --admin-username azureuser \
           --generate-ssh-keys
 
@@ -125,13 +120,12 @@ jobs:
         sudo systemctl enable jenkins
         sudo systemctl start jenkins
         EOF
-        
-  # Cleanup on failure (Optional step)
+
+    # Cleanup on failure (Optional step)
     - name: Cleanup on Failure
       if: failure()
       run: |
-        rg_exists=$(az group exists --name divergenceRG2)
-        if [ "$rg_exists" = "true" ]; then
+        if az group exists --name divergenceRG2; then
           echo "Cleaning up resources due to failure..."
           az group delete --name divergenceRG2 --yes --no-wait
         else
