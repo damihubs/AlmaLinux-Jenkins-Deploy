@@ -1,4 +1,4 @@
-name: Deploy AlmaLinux VM with Automated Image Selection
+name: Incremental Deployment with Fail-Safe Measures
 
 on:
   push:
@@ -18,21 +18,32 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: Clean Up Existing Resource Group
+    # Check if Resource Group Exists and Handle Deleting State
+    - name: Check Resource Group
+      id: check-rg
       run: |
-        az group delete --name divergenceRG --yes --no-wait || echo "Resource group does not exist or cannot be deleted."
+        rg_exists=$(az group exists --name divergenceRG2)
+        if [ "$rg_exists" == "true" ]; then
+          rg_state=$(az group show --name divergenceRG2 --query "properties.provisioningState" -o tsv)
+          if [ "$rg_state" == "Deleting" ]; then
+            echo "Resource group is in Deleting state. Cleaning up..."
+            az group delete --name divergenceRG2 --yes --no-wait
+            echo "exists=false" >> $GITHUB_ENV
+          else
+            echo "Resource Group exists."
+            echo "exists=true" >> $GITHUB_ENV
+          fi
+        else
+          echo "Resource Group does not exist."
+          echo "exists=false" >> $GITHUB_ENV
 
-    - name: Wait for Resource Group Deletion to Complete
+    # Conditionally create the Resource Group if it doesn't exist
+    - name: Create Resource Group (if not exists)
+      if: env.exists == 'false'
       run: |
-        while az group exists --name divergenceRG; do
-          echo "Waiting for resource group 'divergenceRG' to be deleted..."
-          sleep 30
-        done
+        az group create --name divergenceRG2 --location eastus
 
-    - name: Create Resource Group
-      run: |
-        az group create --name divergenceRG --location eastus
-
+    # Query Available AlmaLinux Images
     - name: Query Available AlmaLinux Images
       id: image-search
       run: |
@@ -41,26 +52,35 @@ jobs:
         echo "Latest AlmaLinux Image URN: $latest_image"
         echo "::set-output name=image-urn::$latest_image"
 
-    - name: Debug:Print Image URN
-      run: echo "Selected Image URN:${{ steps.image-search.outputs.image-urn }}"
-
-    - name: Create AlmaLinux VM
+    # Check if VM exists before creating it
+    - name: Check if VM Exists
+      id: check-vm
       run: |
-        if [ -z "${{ steps.image-search.outputs.image-urn }}" ]; then
-          echo "No valid image URN found. Exiting."
-          exit 1
-        fi
+        vm_exists=$(az vm list --resource-group divergenceRG2 --query "[?name=='AlmaLinuxVM'].name" -o tsv)
+        if [ -z "$vm_exists" ]; then
+          echo "VM does not exist."
+          echo "vm_exists=false" >> $GITHUB_ENV
+        else
+          echo "VM already exists."
+          echo "vm_exists=true" >> $GITHUB_ENV
+
+    # Conditionally Create AlmaLinux VM only if it doesn't exist
+    - name: Create AlmaLinux VM
+      if: env.vm_exists == 'false'
+      run: |
         az vm create \
-          --resource-group divergenceRG \
+          --resource-group divergenceRG2 \
           --name AlmaLinuxVM \
           --image ${{ steps.image-search.outputs.image-urn }} \
           --admin-username azureuser \
           --generate-ssh-keys
 
+    # Conditionally Open Ports in NSG if the VM is newly created
     - name: Open Ports in NSG for HTTP and Jenkins
+      if: env.vm_exists == 'false'
       run: |
         az network nsg rule create \
-          --resource-group divergenceRG \
+          --resource-group divergenceRG2 \
           --nsg-name AlmaLinuxVMNSG \
           --name AllowHTTP \
           --protocol tcp \
@@ -69,9 +89,10 @@ jobs:
           --access allow
 
     - name: Open Ports in NSG for Jenkins
+      if: env.vm_exists == 'false'
       run: |
         az network nsg rule create \
-          --resource-group divergenceRG \
+          --resource-group divergenceRG2 \
           --nsg-name AlmaLinuxVMNSG \
           --name AllowJenkins \
           --protocol tcp \
@@ -80,9 +101,10 @@ jobs:
           --access allow
 
     - name: Open Ports in NSG for SSH
+      if: env.vm_exists == 'false'
       run: |
         az network nsg rule create \
-          --resource-group divergenceRG \
+          --resource-group divergenceRG2 \
           --nsg-name AlmaLinuxVMNSG \
           --name AllowSSH \
           --protocol tcp \
@@ -90,9 +112,10 @@ jobs:
           --destination-port-ranges 22 \
           --access allow
 
+    # Install Jenkins on the VM (Always run if the VM exists)
     - name: Install Jenkins on AlmaLinux VM
       run: |
-        ssh -i /home/runner/.ssh/id_rsa azureuser@$(az vm show --resource-group divergenceRG --name AlmaLinuxVM --show-details --query [publicIpAddress] -o tsv) <<EOF
+        ssh -i /home/runner/.ssh/id_rsa azureuser@$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --show-details --query [publicIpAddress] -o tsv) <<EOF
         sudo yum update -y
         sudo yum install -y java-11-openjdk
         sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
@@ -101,3 +124,10 @@ jobs:
         sudo systemctl enable jenkins
         sudo systemctl start jenkins
         EOF
+
+    # Cleanup on failure (Optional step)
+    - name: Cleanup on Failure
+      if: failure()
+      run: |
+        echo "Cleaning up resources due to failure..."
+        az group delete --name divergenceRG2 --yes --no-wait
