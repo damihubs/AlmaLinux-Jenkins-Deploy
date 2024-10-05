@@ -35,35 +35,48 @@ jobs:
       run: |
         az group create --name divergenceRG2 --location eastus
 
-    # Step 3: Create Networking Components (Virtual Network, Subnet, NSG, Public IP, NIC)
-    - name: Create Virtual Network and Subnet
+    # Step 3: Query Available AlmaLinux Images and select the latest
+    - name: Query Available AlmaLinux Images
+      id: image-search
       run: |
-        az network vnet create --resource-group divergenceRG2 --name AlmaLinuxVNet --subnet-name AlmaLinuxSubnet
+        latest_image=$(az vm image list --offer almalinux --all --output json | jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' | head -n 1)
+        if [ -z "$latest_image" ]; then
+          echo "Failed to retrieve AlmaLinux image URN."
+          exit 1
+        else
+          echo "Latest AlmaLinux Image URN: $latest_image"
+          echo "::set-output name=image-urn::$latest_image"
+        fi
 
-    - name: Create Network Security Group (NSG)
+    # Step 4: Check if the VM exists
+    - name: Check if VM Exists
       run: |
-        az network nsg create --resource-group divergenceRG2 --name AlmaLinuxNSG
+        if az vm show --resource-group divergenceRG2 --name AlmaLinuxVM > /dev/null 2>&1; then
+          echo "VM exists."
+          echo "vm_exists=true" >> $GITHUB_ENV
+        else
+          echo "VM does not exist."
+          echo "vm_exists=false" >> $GITHUB_ENV
+        fi
 
-    - name: Create Public IP
-      run: |
-        az network public-ip create --resource-group divergenceRG2 --name AlmaLinuxPublicIP --allocation-method Static
-
-    - name: Create Network Interface (NIC)
-      run: |
-        az network nic create --resource-group divergenceRG2 --name AlmaLinuxNIC --vnet-name AlmaLinuxVNet --subnet AlmaLinuxSubnet --network-security-group AlmaLinuxNSG --public-ip-address AlmaLinuxPublicIP
-
-    # Step 4: Create AlmaLinux VM with the Public IP attached
+    # Step 5: Create AlmaLinux VM with the Public IP attached, ensure the image URN is valid
     - name: Create AlmaLinux VM
+      if: env.vm_exists == 'false'
       run: |
+        image_urn=${{ steps.image-search.outputs.image-urn }}
+        if [ -z "$image_urn" ]; then
+          echo "Image URN is empty. Stopping the workflow."
+          exit 1
+        fi
         az vm create \
           --resource-group divergenceRG2 \
           --name AlmaLinuxVM \
-          --image ${{ steps.image-search.outputs.image-urn }} \
+          --image "$image_urn" \
           --admin-username azureuser \
           --nics AlmaLinuxNIC \
           --generate-ssh-keys
 
-    # Step 5: Retry Public IP Assignment (Loop until available or timeout)
+    # Step 6: Retry Public IP Assignment (Loop until available or timeout)
     - name: Retrieve Public IP Address
       run: |
         for i in {1..10}; do
@@ -83,7 +96,7 @@ jobs:
           fi
         done
 
-    # Step 6: Install Jenkins on the AlmaLinux VM using SSH
+    # Step 7: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
       run: |
         ssh -o StrictHostKeyChecking=no -i /home/runner/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
@@ -96,7 +109,7 @@ jobs:
         sudo systemctl start jenkins
         EOF
 
-    # Step 7: Open Ports in NSG for HTTP, Jenkins, and SSH
+    # Step 8: Open Ports in NSG for HTTP, Jenkins, and SSH
     - name: Open Ports in NSG for HTTP and Jenkins
       run: |
         az network nsg rule create \
@@ -130,7 +143,7 @@ jobs:
           --destination-port-ranges 22 \
           --access allow
 
-    # Step 8: Cleanup on failure
+    # Step 9: Cleanup on failure
     - name: Cleanup on Failure
       if: failure()
       run: |
@@ -139,3 +152,4 @@ jobs:
           az group delete --name divergenceRG2 --yes --no-wait
         else
           echo "No resource group found for cleanup."
+        fi
