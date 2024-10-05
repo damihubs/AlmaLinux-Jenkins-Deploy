@@ -18,7 +18,7 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Step 1: Create Resource Group
+    # Step 1: Create Resource Group if not exists
     - name: Create Resource Group if not exists
       run: |
         rg_exists=$(az group exists --name divergenceRG2)
@@ -153,14 +153,14 @@ jobs:
         for i in {1..10}; do
           echo "Attempting SSH connection to ${public_ip} (Attempt $i)..."
           ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
-          sudo yum update -y
-          sudo yum install -y java-11-openjdk
-          sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-          sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
-          sudo yum install -y jenkins
-          sudo systemctl enable jenkins
-          sudo systemctl start jenkins
-          EOF
+sudo yum update -y
+sudo yum install -y java-11-openjdk
+sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+sudo yum install -y jenkins
+sudo systemctl enable jenkins
+sudo systemctl start jenkins
+EOF
           if [ $? -eq 0 ]; then
             echo "Jenkins installed successfully."
             break
@@ -184,7 +184,7 @@ jobs:
           --protocol tcp \
           --priority 1001 \
           --destination-port-ranges 80 \
-          --access allow || echo "HTTP rule already exists."
+          --access allow || true
 
     - name: Open Ports in NSG for Jenkins
       run: |
@@ -195,7 +195,7 @@ jobs:
           --protocol tcp \
           --priority 1002 \
           --destination-port-ranges 8080 \
-          --access allow || echo "Jenkins rule already exists."
+          --access allow || true
 
     - name: Open Ports in NSG for SSH
       run: |
@@ -206,7 +206,7 @@ jobs:
           --protocol tcp \
           --priority 1003 \
           --destination-port-ranges 22 \
-          --access allow || echo "SSH rule already exists."
+          --access allow || true
 
     # Step 10: Cleanup on failure
     - name: Cleanup on Failure
