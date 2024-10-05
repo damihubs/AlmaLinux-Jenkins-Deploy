@@ -41,8 +41,8 @@ jobs:
         echo "Latest AlmaLinux Image URN: $latest_image"
         echo "::set-output name=image-urn::$latest_image"
 
-    - name: Debug: Print Image URN
-      run: echo "Selected Image URN: ${{ steps.image-search.outputs.image-urn }}"
+    - name: Debug:Print Image URN
+      run: echo "Selected Image URN:${{ steps.image-search.outputs.image-urn }}"
 
     - name: Create AlmaLinux VM
       run: |
