@@ -36,6 +36,7 @@ jobs:
         else
           echo "Resource Group does not exist."
           echo "exists=false" >> $GITHUB_ENV
+        fi
 
     # Conditionally create the Resource Group if it doesn't exist
     - name: Create Resource Group (if not exists)
@@ -129,5 +130,9 @@ jobs:
     - name: Cleanup on Failure
       if: failure()
       run: |
-        echo "Cleaning up resources due to failure..."
-        az group delete --name divergenceRG2 --yes --no-wait
+        rg_exists=$(az group exists --name divergenceRG2)
+        if [ "$rg_exists" == "true" ]; then
+          echo "Cleaning up resources due to failure..."
+          az group delete --name divergenceRG2 --yes --no-wait
+        else
+          echo "No resource group found for cleanup."
