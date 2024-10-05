@@ -18,7 +18,7 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Step 1: Create Resource Group (skip if exists)
+    # Step 1: Create Resource Group
     - name: Create Resource Group if not exists
       run: |
         rg_exists=$(az group exists --name divergenceRG2)
@@ -43,8 +43,8 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Step 2: Generate SSH Keys (skip if they exist)
-    - name: Generate SSH Keys if not exist
+    # Step 2: Generate SSH Keys if not exist
+    - name: Generate SSH Keys
       run: |
         if [ ! -f ~/.ssh/id_rsa ]; then
           ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_rsa -N ""
@@ -53,7 +53,7 @@ jobs:
           echo "SSH keys already exist. Skipping generation."
         fi
 
-    # Step 3: Create Networking Components (skip if they exist)
+    # Step 3: Create Networking Components (skip if exists)
     - name: Create Virtual Network and Subnet if not exists
       run: |
         vnet_exists=$(az network vnet show --resource-group divergenceRG2 --name AlmaLinuxVNet --query id --output tsv || echo "None")
@@ -108,7 +108,7 @@ jobs:
         fi
 
     # Step 5: Create AlmaLinux VM if not exists
-    - name: Create AlmaLinux VM if not exists
+    - name: Create AlmaLinux VM
       run: |
         vm_exists=$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --query id --output tsv || echo "None")
         if [ "$vm_exists" = "None" ]; then
@@ -150,17 +150,31 @@ jobs:
     # Step 8: Install Jenkins on the AlmaLinux VM using SSH
     - name: Install Jenkins on AlmaLinux VM
       run: |
-        ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
-        sudo yum update -y
-        sudo yum install -y java-11-openjdk
-        sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
-        sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
-        sudo yum install -y jenkins
-        sudo systemctl enable jenkins
-        sudo systemctl start jenkins
-        EOF
+        for i in {1..10}; do
+          echo "Attempting SSH connection to ${public_ip} (Attempt $i)..."
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -i ~/.ssh/id_rsa azureuser@${{ env.public_ip }} <<EOF
+          sudo yum update -y
+          sudo yum install -y java-11-openjdk
+          sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+          sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+          sudo yum install -y jenkins
+          sudo systemctl enable jenkins
+          sudo systemctl start jenkins
+          EOF
+          if [ $? -eq 0 ]; then
+            echo "Jenkins installed successfully."
+            break
+          else
+            echo "Failed to SSH into the VM. Retrying in 30 seconds..."
+            sleep 30
+          fi
+          if [ $i -eq 10 ]; then
+            echo "Failed to install Jenkins after multiple attempts."
+            exit 1
+          fi
+        done
 
-    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH (always check and create if necessary)
+    # Step 9: Open Ports in NSG for HTTP, Jenkins, and SSH
     - name: Open Ports in NSG for HTTP and Jenkins
       run: |
         az network nsg rule create \
