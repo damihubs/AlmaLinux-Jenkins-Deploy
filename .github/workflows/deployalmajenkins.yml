@@ -1,4 +1,4 @@
-name: Incremental Deployment with Fail-Safe Measures
+name: Debug AlmaLinux VM Deployment
 
 on:
   push:
@@ -18,49 +18,32 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    # Check if Resource Group Exists and Handle Deleting State
+    # Step 1: Directly Check Resource Group and Print
     - name: Check Resource Group
       run: |
-        if az group exists --name divergenceRG2; then
-          rg_state=$(az group show --name divergenceRG2 --query "properties.provisioningState" -o tsv)
-          if [ "$rg_state" = "Deleting" ]; then
-            echo "Resource group is in Deleting state. Exiting."
-            exit 1
-          else
-            echo "Resource Group exists."
-            echo "exists=true" >> $GITHUB_ENV
-          fi
-        else
-          echo "Resource Group does not exist."
-          echo "exists=false" >> $GITHUB_ENV
+        bash -c "if az group exists --name divergenceRG2; then echo 'Resource Group exists.'; echo 'exists=true' >> $GITHUB_ENV; else echo 'Resource Group does not exist.'; echo 'exists=false' >> $GITHUB_ENV; fi"
 
-    # Conditionally create the Resource Group if it doesn't exist
-    - name: Create Resource Group (if not exists)
+    # Step 2: Conditionally Create Resource Group if not exists
+    - name: Create Resource Group
       if: env.exists == 'false'
       run: |
         az group create --name divergenceRG2 --location eastus
 
-    # Query Available AlmaLinux Images
+    # Step 3: Query Available AlmaLinux Images
     - name: Query Available AlmaLinux Images
       id: image-search
       run: |
-        az vm image list --offer almalinux --all --output json > image_list.json
-        latest_image=$(jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' image_list.json | head -n 1)
-        echo "Latest AlmaLinux Image URN: $latest_image"
+        echo "Querying AlmaLinux images..."
+        az vm image list --offer almalinux --all --output table
+        latest_image=$(az vm image list --offer almalinux --all --output json | jq -r 'sort_by(.version) | reverse | .[] | select(.offer == "almalinux") | .urn' | head -n 1)
         echo "::set-output name=image-urn::$latest_image"
 
-    # Check if VM exists before creating it
+    # Step 4: Directly Check if VM Exists and Print
     - name: Check if VM Exists
       run: |
-        if az vm show --resource-group divergenceRG2 --name AlmaLinuxVM > /dev/null 2>&1; then
-          echo "VM already exists."
-          echo "vm_exists=true" >> $GITHUB_ENV
-        else
-          echo "VM does not exist."
-          echo "vm_exists=false" >> $GITHUB_ENV
-        fi
+        bash -c "if az vm show --resource-group divergenceRG2 --name AlmaLinuxVM > /dev/null 2>&1; then echo 'VM exists.'; echo 'vm_exists=true' >> $GITHUB_ENV; else echo 'VM does not exist.'; echo 'vm_exists=false' >> $GITHUB_ENV; fi"
 
-    # Conditionally Create AlmaLinux VM only if it doesn't exist
+    # Step 5: Conditionally Create AlmaLinux VM only if it doesn't exist
     - name: Create AlmaLinux VM
       if: env.vm_exists == 'false'
       run: |
@@ -71,7 +54,7 @@ jobs:
           --admin-username azureuser \
           --generate-ssh-keys
 
-    # Conditionally Open Ports in NSG if the VM is newly created
+    # Step 6: Conditionally Open Ports in NSG for HTTP, Jenkins, and SSH if the VM is newly created
     - name: Open Ports in NSG for HTTP and Jenkins
       if: env.vm_exists == 'false'
       run: |
@@ -108,7 +91,7 @@ jobs:
           --destination-port-ranges 22 \
           --access allow
 
-    # Install Jenkins on the VM (Always run if the VM exists)
+    # Step 7: Install Jenkins on the VM
     - name: Install Jenkins on AlmaLinux VM
       run: |
         ssh -i /home/runner/.ssh/id_rsa azureuser@$(az vm show --resource-group divergenceRG2 --name AlmaLinuxVM --show-details --query [publicIpAddress] -o tsv) <<EOF
@@ -121,7 +104,7 @@ jobs:
         sudo systemctl start jenkins
         EOF
 
-    # Cleanup on failure (Optional step)
+    # Step 8: Cleanup on failure
     - name: Cleanup on Failure
       if: failure()
       run: |
